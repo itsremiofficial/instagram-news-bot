@@ -134,6 +134,12 @@ def publish_to_instagram(image_path, content):
         "caption": caption,
         "access_token": TOKEN
     }).json()
+
+    print("Instagram media response:", json.dumps(r1, indent=2))
+
+    if "id" not in r1:
+        raise Exception(f"Instagram media creation failed: {r1}")
+
     container_id = r1["id"]
 
     # Step 3: Wait for container to process (poll)
