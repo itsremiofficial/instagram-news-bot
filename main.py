@@ -102,7 +102,7 @@ def create_image(content, keyword):
 
     # Source label at bottom
     draw.text((80, 960), "YOUR NEWS PAGE  •  @handle",
-              font=font_src, fill="rgba(255,255,255,0.7)")
+          font=font_src, fill=(255, 255, 255, 180))
 
     path = "/tmp/post.jpg"
     bg.convert("RGB").save(path, quality=95)
