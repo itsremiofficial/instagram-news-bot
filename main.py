@@ -1,3 +1,55 @@
+import requests, os, json, hashlib
+from datetime import datetime, timedelta
+
+import google.generativeai as genai
+
+genai.configure(api_key=os.environ["GEMINI_KEY"])
+model = genai.GenerativeModel("gemini-2.0-flash")
+
+def fetch_news():
+    url = "https://gnews.io/api/v4/top-headlines"
+    params = {
+        "token": os.environ["GNEWS_KEY"],
+        "lang":  "en",
+        "max":   "10",
+        "topic": "world",  # or: breaking-news, technology, sports
+    }
+    articles = requests.get(url, params=params).json()["articles"]
+
+    # Score each article: recency + has image + trusted source
+    def score(a):
+        age = (datetime.utcnow() - datetime.fromisoformat(
+                 a["publishedAt"].replace("Z",""))).seconds / 3600
+        s = max(0, 10 - age)                      # newer = higher score
+        s += 4 if a.get("image") else 0          # image available
+        s += 3 if len(a["content"]) > 200 else 0  # enough content
+        return s
+
+    best = sorted(articles, key=score, reverse=True)[0]
+    return best
+
+
+
+def generate_content(article):
+    prompt = f"""
+You are a news social media editor. Given this article, return ONLY
+valid JSON — no markdown, no backticks, no explanation.
+
+Article title: {article['title']}
+Article summary: {article['description']}
+
+Return JSON with exactly these fields:
+- "headline": 6-word punchy graphic headline (all caps)
+- "caption": 2 sentence engaging summary, conversational, max 1 emoji
+- "cta": one sentence call-to-action (e.g. "Save this for later 📌")
+- "hashtags": list of 8 relevant hashtags as strings
+- "graphic_color": one of: "#1e293b", "#7f1d1d", "#1e3a5f", "#14532d"
+"""
+
+    response = model.generate_content(prompt)
+    return json.loads(response.text)
+
+
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import io, textwrap
 
@@ -39,3 +91,75 @@ def create_image(content, keyword):
     path = "/tmp/post.jpg"
     bg.convert("RGB").save(path, quality=95)
     return path
+
+
+import time
+
+def upload_image_free(filepath):
+    # ImgBB — free image hosting with API (no login needed)
+    with open(filepath, "rb") as f:
+        r = requests.post("https://api.imgbb.com/1/upload",
+            data={"key": os.environ["IMGBB_KEY"]},
+            files={"image": f})
+    return r.json()["data"]["url"]
+
+def publish_to_instagram(image_path, content):
+    BASE = f"https://graph.facebook.com/v21.0/{os.environ['IG_USER_ID']}"
+    TOKEN = os.environ["IG_TOKEN"]
+    caption = (content["caption"] + "\n\n" + content["cta"] +
+               "\n\n" + " ".join(content["hashtags"]))
+
+    # Step 1: Upload image to free host
+    image_url = upload_image_free(image_path)
+
+    # Step 2: Create media container
+    r1 = requests.post(f"{BASE}/media", data={
+        "image_url": image_url,
+        "caption": caption,
+        "access_token": TOKEN
+    }).json()
+    container_id = r1["id"]
+
+    # Step 3: Wait for container to process (poll)
+    for _ in range(10):
+        status = requests.get(f"https://graph.facebook.com/v21.0/{container_id}",
+            params={"fields":"status_code","access_token":TOKEN}).json()
+        if status.get("status_code") == "FINISHED": break
+        time.sleep(3)
+
+    # Step 4: Publish
+    r2 = requests.post(f"{BASE}/media_publish", data={
+        "creation_id": container_id,
+        "access_token": TOKEN
+    }).json()
+    return r2.get("id")
+
+
+import gspread
+from google.oauth2.service_account import ServiceAccountCredentials
+
+def log_to_sheets(article, content, post_id, status):
+    creds_json = json.loads(os.environ["GSHEET_CREDS"])
+    scope = ["https://spreadsheets.google.com/feeds",
+             "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+    client = gspread.authorize(creds)
+    sheet = client.open("Instagram Bot Log").sheet1
+
+    sheet.append_row([
+        datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+        article["title"][:80],
+        content["headline"],
+        post_id or "FAILED",
+        status,
+        article.get("url", "")
+    ])
+
+# ─── MAIN ENTRY POINT ───────────────────────────────────────────
+if __name__ == "__main__":
+    article = fetch_news()
+    content = generate_content(article)
+    img_path = create_image(content, article["title"].split()[0])
+    post_id  = publish_to_instagram(img_path, content)
+    log_to_sheets(article, content, post_id, "success" if post_id else "failed")
+    print(f"✓ Posted: {content['headline']}")
