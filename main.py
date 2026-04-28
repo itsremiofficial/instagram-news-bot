@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import google.generativeai as genai
 
 genai.configure(api_key=os.environ["GEMINI_KEY"])
-model = genai.GenerativeModel("gemini-2.0-flash")
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 def fetch_news():
     url = "https://gnews.io/api/v4/top-headlines"
