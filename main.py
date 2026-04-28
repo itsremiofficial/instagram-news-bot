@@ -46,8 +46,24 @@ Return JSON with exactly these fields:
 - "graphic_color": one of: "#1e293b", "#7f1d1d", "#1e3a5f", "#14532d"
 """
 
+    import re
+
     response = model.generate_content(prompt)
-    return json.loads(response.text)
+
+    raw = response.text.strip()
+
+    # Remove ```json ... ``` or ``` ... ``` if Gemini adds markdown
+    raw = re.sub(r"^```json\s*", "", raw)
+    raw = re.sub(r"^```\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+
+    # Extract first JSON object from the response
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+
+    if not match:
+        raise ValueError(f"Gemini did not return JSON. Raw response: {raw}")
+
+    return json.loads(match.group(0))
 
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
