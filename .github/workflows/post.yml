@@ -18,6 +18,7 @@ jobs:
           GNEWS_KEY: ${{ secrets.GNEWS_KEY }}
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           PEXELS_KEY: ${{ secrets.PEXELS_KEY }}
+          IMGBB_KEY: ${{ secrets.IMGBB_KEY }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IG_TOKEN: ${{ secrets.IG_TOKEN }}
           GSHEET_CREDS: ${{ secrets.GSHEET_CREDS }}
