@@ -136,13 +136,17 @@ def publish_to_instagram(image_path, content):
 
 
 import gspread
-from google.oauth2.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 
 def log_to_sheets(article, content, post_id, status):
     creds_json = json.loads(os.environ["GSHEET_CREDS"])
-    scope = ["https://spreadsheets.google.com/feeds",
-             "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+
+    creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
     client = gspread.authorize(creds)
     sheet = client.open("Instagram Bot Log").sheet1
 
@@ -154,7 +158,6 @@ def log_to_sheets(article, content, post_id, status):
         status,
         article.get("url", "")
     ])
-
 # ─── MAIN ENTRY POINT ───────────────────────────────────────────
 if __name__ == "__main__":
     article = fetch_news()
