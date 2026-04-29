@@ -12,7 +12,7 @@ import gspread
 import requests
 from google import genai
 from google.oauth2.service_account import Credentials
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 
 GNEWS_URL = "https://gnews.io/api/v4/top-headlines"
@@ -39,8 +39,7 @@ def fetch_news():
     response = requests.get(GNEWS_URL, params=params, timeout=30)
     response.raise_for_status()
 
-    data = response.json()
-    articles = data.get("articles", [])
+    articles = response.json().get("articles", [])
 
     if not articles:
         raise RuntimeError("No articles found from GNews.")
@@ -64,8 +63,7 @@ def fetch_news():
 
         return score_value
 
-    best_article = sorted(articles, key=score, reverse=True)[0]
-    return best_article
+    return sorted(articles, key=score, reverse=True)[0]
 
 
 def build_local_fallback_content(article):
@@ -75,22 +73,16 @@ def build_local_fallback_content(article):
     clean_title = re.sub(r"[^\w\s]", "", title).strip()
     words = clean_title.split()
 
-    if len(words) >= 4:
-        headline = " ".join(words[:8]).upper()
-    else:
-        headline = "BREAKING STORY DEVELOPING NOW"
+    headline = " ".join(words[:8]).upper() if len(words) >= 4 else "BREAKING STORY DEVELOPING"
 
-    caption_source = description or title
-    caption_source = caption_source.strip()
+    caption_source = (description or title).strip()
 
     if len(caption_source) > 180:
         caption_source = caption_source[:177].rsplit(" ", 1)[0] + "..."
 
-    caption = f"{caption_source} This story is developing."
-
     return {
         "headline": headline,
-        "caption": caption,
+        "caption": f"{caption_source} This story is developing.",
         "cta": "What do you think about this?",
         "hashtags": [
             "#News",
@@ -102,7 +94,7 @@ def build_local_fallback_content(article):
             "#NewsUpdate",
             "#TheWorldJournal",
         ],
-        "graphic_color": "#1e293b",
+        "graphic_color": "#1e3a5f",
     }
 
 
@@ -110,42 +102,27 @@ def generate_content(article):
     prompt = f"""
 You are a senior news social media editor creating content for modern, high-impact Instagram news graphics.
 
-Your output will be used on bold, visually striking social media cards similar to premium news carousel and breaking-news templates. The style should feel sharp, clean, attention-grabbing, and highly clickable.
-
-Given the article below, return ONLY valid JSON.
-Do not return markdown.
-Do not return backticks.
-Do not return commentary or explanation.
+Return ONLY valid JSON.
+No markdown.
+No backticks.
+No explanation.
 
 Article title: {article.get("title", "")}
 Article summary: {article.get("description", "")}
 
-Content goals:
-- The headline must be the strongest hook.
-- The headline must stop scrolling and create curiosity instantly.
-- The headline must feel urgent, important, or emotionally compelling.
-- The headline must stay fact-based and avoid misinformation.
-- The wording should fit cleanly on a graphic card.
-- The style should match bold social news visuals, with short, punchy, high-impact phrasing.
-- The caption should feel engaging and easy to read.
-- The caption should summarize the story clearly and make people care.
-- The CTA should encourage interaction.
-- Hashtags should be relevant and useful for discoverability.
-
 Return JSON with exactly these fields:
-- "headline": a strong hook-style graphic headline in ALL CAPS, 4 to 8 words, punchy, curiosity-driven, visually powerful, easy to place on a news card
-- "caption": exactly 2 short sentences, engaging and conversational, summarizing the news clearly, max 1 emoji
-- "cta": one short engagement-focused sentence, for example "What do you think about this?"
+- "headline": a strong hook-style graphic headline in ALL CAPS, 4 to 8 words, punchy, curiosity-driven, fact-based, and made for a bold news card
+- "caption": exactly 2 short sentences, engaging and conversational, max 1 emoji
+- "cta": one short engagement-focused sentence
 - "hashtags": a list of 8 relevant hashtags as strings
 - "graphic_color": one of: "#1e293b", "#7f1d1d", "#1e3a5f", "#14532d"
 
 Headline rules:
-- Use strong hook language.
-- Prefer tension, urgency, surprise, impact, or curiosity.
-- Avoid weak generic summaries.
-- Avoid clickbait that misrepresents the story.
-- Avoid long headlines.
-- Make it feel made for a bold visual card.
+- Make the headline the strongest hook.
+- Use urgency, tension, surprise, or impact.
+- Avoid weak summaries.
+- Avoid false clickbait.
+- Keep it short enough for a square Instagram graphic.
 """
 
     max_retries_per_model = 2
@@ -167,7 +144,6 @@ Headline rules:
                     raise ValueError("Gemini returned an empty response.")
 
                 raw = response.text.strip()
-
                 raw = re.sub(r"^```json\s*", "", raw)
                 raw = re.sub(r"^```\s*", "", raw)
                 raw = re.sub(r"\s*```$", "", raw)
@@ -227,7 +203,7 @@ def validate_generated_content(content):
     if not isinstance(content["hashtags"], list):
         raise ValueError("Gemini field 'hashtags' must be a list.")
 
-    if len(content["hashtags"]) == 0:
+    if not content["hashtags"]:
         raise ValueError("Gemini returned no hashtags.")
 
 
@@ -247,8 +223,7 @@ def fetch_bg_image(keyword):
     )
     response.raise_for_status()
 
-    data = response.json()
-    photos = data.get("photos", [])
+    photos = response.json().get("photos", [])
 
     if not photos:
         raise RuntimeError(f"No Pexels image found for keyword: {keyword}")
@@ -261,36 +236,135 @@ def fetch_bg_image(keyword):
     return Image.open(io.BytesIO(image_response.content)).convert("RGB")
 
 
-def create_image(content, keyword):
+def download_image(url):
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    return Image.open(io.BytesIO(response.content)).convert("RGB")
+
+
+def get_background_image(article, keyword):
+    article_image = article.get("image")
+
+    if article_image:
+        try:
+            return download_image(article_image)
+        except Exception as error:
+            print(f"Article image failed. Using Pexels fallback. Error: {error}")
+
+    return fetch_bg_image(keyword)
+
+
+def load_font(path, size):
+    try:
+        return ImageFont.truetype(path, size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def wrap_text_by_width(draw, text, font, max_width):
+    words = str(text).split()
+    lines = []
+    current_line = ""
+
+    for word in words:
+        test_line = f"{current_line} {word}".strip()
+        bbox = draw.textbbox((0, 0), test_line, font=font)
+        test_width = bbox[2] - bbox[0]
+
+        if test_width <= max_width:
+            current_line = test_line
+        else:
+            if current_line:
+                lines.append(current_line)
+            current_line = word
+
+    if current_line:
+        lines.append(current_line)
+
+    return lines
+
+
+def paste_rounded_image(base, image, box, radius=38):
+    x, y, width, height = box
+    fitted = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)
+
+    mask = Image.new("L", (width, height), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((0, 0, width, height), radius=radius, fill=255)
+
+    base.paste(fitted.convert("RGBA"), (x, y), mask)
+
+
+def create_image(content, keyword, article):
     size = (1080, 1080)
-    bg = fetch_bg_image(keyword).resize(size)
+    bg_color = content.get("graphic_color", "#1e3a5f")
+    accent_color = "#eaff00"
 
-    overlay = Image.new("RGBA", size, (0, 0, 0, 170))
-    bg = bg.convert("RGBA")
-    bg.paste(overlay, mask=overlay)
+    canvas = Image.new("RGBA", size, bg_color)
+    draw = ImageDraw.Draw(canvas)
 
-    draw = ImageDraw.Draw(bg)
+    font_logo = load_font("Roboto-Bold.ttf", 28)
+    font_badge = load_font("Roboto-Bold.ttf", 30)
+    font_headline = load_font("Roboto-Bold.ttf", 76)
+    font_caption = load_font("Roboto-Regular.ttf", 32)
+    font_small = load_font("Roboto-Regular.ttf", 25)
+    font_button = load_font("Roboto-Bold.ttf", 24)
 
-    font_big = ImageFont.truetype("Roboto-Bold.ttf", 72)
-    font_src = ImageFont.truetype("Roboto-Regular.ttf", 32)
-
-    headline = content["headline"]
-    lines = textwrap.wrap(headline, width=16)
-
-    y = 380
-
-    for line in lines:
-        draw.text((80, y), line, font=font_big, fill="white")
-        y += 90
-
-    draw.text(
-        (80, 960),
-        "THE WORLD JOURNAL  •  @the.worldjournal",
-        font=font_src,
-        fill=(255, 255, 255, 180),
+    draw.ellipse((730, -210, 1280, 360), fill=(255, 255, 255, 24))
+    draw.ellipse((-220, 740, 360, 1320), fill=(255, 255, 255, 18))
+    draw.rounded_rectangle(
+        (44, 44, 1036, 1036),
+        radius=48,
+        outline=(255, 255, 255, 42),
+        width=2,
     )
 
-    bg.convert("RGB").save(POST_IMAGE_PATH, quality=95)
+    draw.rounded_rectangle((70, 60, 255, 122), radius=10, fill=(0, 0, 0, 210))
+    draw.text((88, 72), "THE WORLD", font=font_logo, fill="white")
+    draw.rectangle((88, 104, 220, 111), fill=accent_color)
+
+    bg_image = get_background_image(article, keyword)
+    paste_rounded_image(canvas, bg_image, (70, 145, 940, 430), radius=42)
+
+    image_overlay = Image.new("RGBA", (940, 430), (0, 0, 0, 70))
+    image_mask = Image.new("L", (940, 430), 0)
+    image_mask_draw = ImageDraw.Draw(image_mask)
+    image_mask_draw.rounded_rectangle((0, 0, 940, 430), radius=42, fill=255)
+    canvas.paste(image_overlay, (70, 145), image_mask)
+
+    draw.rounded_rectangle((70, 605, 365, 662), radius=13, fill=accent_color)
+    draw.text((96, 617), "BREAKING NEWS", font=font_badge, fill="black")
+
+    draw.rounded_rectangle((70, 690, 1010, 908), radius=34, fill="white")
+
+    headline = content.get("headline", "BREAKING STORY DEVELOPING").upper()
+    headline_lines = wrap_text_by_width(draw, headline, font_headline, 850)
+
+    y = 718
+    for line in headline_lines[:2]:
+        draw.text((105, y), line, font=font_headline, fill="black")
+        y += 82
+
+    caption = content.get("caption", "")
+    caption_lines = wrap_text_by_width(draw, caption, font_caption, 850)
+
+    y += 10
+    for line in caption_lines[:2]:
+        draw.text((108, y), line, font=font_caption, fill=(40, 40, 40))
+        y += 40
+
+    draw.rounded_rectangle((70, 945, 260, 1000), radius=12, fill=accent_color)
+    draw.text((95, 961), "READ MORE", font=font_button, fill="black")
+    draw.text((225, 959), "➜", font=font_button, fill="black")
+
+    source_name = "Newsmedia"
+    if isinstance(article.get("source"), dict):
+        source_name = article["source"].get("name", "Newsmedia")
+
+    footer_text = f"Source: {source_name}"
+    draw.text((690, 962), footer_text, font=font_small, fill=(255, 255, 255, 225))
+
+    canvas.convert("RGB").save(POST_IMAGE_PATH, quality=95)
     return POST_IMAGE_PATH
 
 
@@ -432,7 +506,7 @@ def main():
     print("Generated content:", json.dumps(content, indent=2))
 
     keyword = article.get("title", "world news").split()[0]
-    image_path = create_image(content, keyword)
+    image_path = create_image(content, keyword, article)
 
     post_id = publish_to_instagram(image_path, content)
 
