@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: pip install requests Pillow google-generativeai gspread google-auth
+      - run: pip install requests Pillow google-genai gspread google-auth
 
       - run: python main.py
         env:
