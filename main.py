@@ -209,72 +209,6 @@ def validate_generated_content(content):
         raise ValueError("Gemini returned no hashtags.")
 
 
-def fetch_bg_image(keyword):
-    headers = {"Authorization": os.environ["PEXELS_KEY"]}
-
-    search_query = keyword
-    if not search_query or len(search_query) < 3:
-        search_query = "world news"
-
-    params = {
-        "query": search_query,
-        "per_page": 5,
-        "orientation": "portrait",
-    }
-
-    response = requests.get(
-        "https://api.pexels.com/v1/search",
-        headers=headers,
-        params=params,
-        timeout=30,
-    )
-    response.raise_for_status()
-
-    photos = response.json().get("photos", [])
-
-    if not photos:
-        raise RuntimeError(f"No Pexels image found for keyword: {search_query}")
-
-    photo_url = photos[0]["src"].get("portrait") or photos[0]["src"].get("large2x")
-
-    image_response = requests.get(photo_url, timeout=30)
-    image_response.raise_for_status()
-
-    return Image.open(io.BytesIO(image_response.content)).convert("RGB")
-
-
-def download_image(url):
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    return Image.open(io.BytesIO(response.content)).convert("RGB")
-
-
-def get_background_image(article, keyword):
-    article_image = article.get("image")
-
-    if article_image:
-        try:
-            img = download_image(article_image)
-
-            if img.width > 100 and img.height > 100:
-                return img
-
-        except Exception as error:
-            print(f"Article image failed. Using Pexels fallback. Error: {error}")
-
-    title = article.get("title", "") or keyword or "world news"
-    cleaned_title = re.sub(r"[^a-zA-Z0-9\s]", " ", title)
-    words = cleaned_title.split()
-
-    search_keyword = " ".join(words[:4]) if words else "world news"
-
-    try:
-        return fetch_bg_image(search_keyword)
-    except Exception as error:
-        print(f"Pexels title search failed. Using generic fallback. Error: {error}")
-        return fetch_bg_image("breaking news")
-
-
 def load_font(path, size):
     try:
         return ImageFont.truetype(path, size)
@@ -309,7 +243,7 @@ def paste_rounded_image(base, image, box, radius=38):
     x, y, width, height = box
 
     fitted = ImageOps.fit(
-        image,
+        image.convert("RGB"),
         (width, height),
         method=Image.Resampling.LANCZOS,
         centering=(0.5, 0.5),
@@ -322,6 +256,165 @@ def paste_rounded_image(base, image, box, radius=38):
     base.paste(fitted.convert("RGBA"), (x, y), mask)
 
 
+def is_image_usable(img):
+    """Reject tiny, blank, black, white, or near-solid images."""
+    try:
+        if not img or img.width < 300 or img.height < 300:
+            return False
+
+        sample = img.convert("L").resize((64, 64))
+        pixels = list(sample.getdata())
+        avg = sum(pixels) / len(pixels)
+        variance = sum((p - avg) ** 2 for p in pixels) / len(pixels)
+
+        # Too dark, too bright, or almost no visible detail.
+        if avg < 25 or avg > 245 or variance < 80:
+            return False
+
+        return True
+    except Exception:
+        return False
+
+
+def download_image(url):
+    response = requests.get(
+        url,
+        timeout=30,
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; InstagramNewsBot/1.0)",
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        },
+    )
+    response.raise_for_status()
+
+    content_type = response.headers.get("content-type", "")
+    if "image" not in content_type.lower():
+        raise RuntimeError(f"URL did not return an image. Content-Type: {content_type}")
+
+    img = Image.open(io.BytesIO(response.content)).convert("RGB")
+
+    if not is_image_usable(img):
+        raise RuntimeError(
+            "Downloaded image is blank, too dark, too small, or unusable."
+        )
+
+    return img
+
+
+def fetch_bg_image(keyword):
+    headers = {"Authorization": os.environ["PEXELS_KEY"]}
+
+    cleaned_keyword = re.sub(r"[^a-zA-Z0-9\s]", " ", keyword or "world news").strip()
+    if len(cleaned_keyword) < 3:
+        cleaned_keyword = "world news"
+
+    search_terms = [
+        cleaned_keyword,
+        "global news",
+        "press conference",
+        "world politics",
+        "breaking news",
+    ]
+
+    for search_query in search_terms:
+        params = {
+            "query": search_query,
+            "per_page": 8,
+            "orientation": "portrait",
+        }
+
+        response = requests.get(
+            "https://api.pexels.com/v1/search",
+            headers=headers,
+            params=params,
+            timeout=30,
+        )
+        response.raise_for_status()
+
+        photos = response.json().get("photos", [])
+
+        for photo in photos:
+            src = photo.get("src", {})
+            photo_url = src.get("large2x") or src.get("portrait") or src.get("large")
+
+            if not photo_url:
+                continue
+
+            try:
+                img = download_image(photo_url)
+                print(f"Using Pexels image from search: {search_query}")
+                return img
+            except Exception as error:
+                print(f"Skipped unusable Pexels image: {error}")
+                continue
+
+    raise RuntimeError("No usable Pexels image found after multiple searches.")
+
+
+def create_placeholder_news_image(content, article):
+    """Create a designed fallback visual instead of leaving the image area black."""
+    w, h = 940, 565
+    base = Image.new("RGB", (w, h), (12, 18, 32))
+    d = ImageDraw.Draw(base)
+
+    accent = "#eaff00"
+    font_big = load_font("Roboto-Bold.ttf", 72)
+    font_mid = load_font("Roboto-Bold.ttf", 38)
+    font_small = load_font("Roboto-Regular.ttf", 26)
+
+    # Editorial gradient feel using layered shapes.
+    for i in range(0, h, 8):
+        shade = int(28 + (i / h) * 34)
+        d.rectangle((0, i, w, i + 8), fill=(shade, shade + 8, shade + 20))
+
+    d.ellipse((-140, -180, 360, 310), fill=(255, 255, 255, 22))
+    d.ellipse((640, 250, 1120, 760), fill=(255, 255, 255, 18))
+    d.rectangle((70, 75, 100, 490), fill=accent)
+
+    # Use a large topic word from the headline.
+    headline = content.get("headline", "BREAKING NEWS").upper()
+    words = [w for w in re.sub(r"[^A-Z0-9\s]", " ", headline).split() if len(w) > 2]
+    topic = words[0] if words else "NEWS"
+
+    d.text((120, 160), topic[:10], font=font_big, fill="white")
+    d.text((120, 245), "DEVELOPING STORY", font=font_mid, fill=accent)
+
+    source_name = "Global News"
+    if isinstance(article.get("source"), dict):
+        source_name = article["source"].get("name", "Global News")
+
+    d.text((120, 325), f"Source: {source_name}", font=font_small, fill=(230, 230, 230))
+
+    # Small abstract news blocks.
+    for x in [690, 735, 780, 825]:
+        d.rounded_rectangle((x, 95, x + 34, 360), radius=12, fill=(255, 255, 255, 28))
+
+    return base
+
+
+def get_background_image(article, keyword, content=None):
+    article_image = article.get("image")
+
+    if article_image:
+        try:
+            img = download_image(article_image)
+            print(f"Using article image: {article_image}")
+            return img
+        except Exception as error:
+            print(f"Article image failed. Using Pexels fallback. Error: {error}")
+
+    title = article.get("title", "") or keyword or "world news"
+    cleaned_title = re.sub(r"[^a-zA-Z0-9\s]", " ", title)
+    words = cleaned_title.split()
+    search_keyword = " ".join(words[:5]) if words else "world news"
+
+    try:
+        return fetch_bg_image(search_keyword)
+    except Exception as error:
+        print(f"Pexels failed. Using designed placeholder. Error: {error}")
+        return create_placeholder_news_image(content or {}, article)
+
+
 def create_image(content, keyword, article):
     size = (1080, 1350)
     bg_color = content.get("graphic_color", "#1e3a5f")
@@ -330,85 +423,79 @@ def create_image(content, keyword, article):
     canvas = Image.new("RGBA", size, bg_color)
     draw = ImageDraw.Draw(canvas)
 
-    font_logo = load_font("Roboto-Bold.ttf", 32)
+    font_logo = load_font("Roboto-Bold.ttf", 34)
     font_tag = load_font("Roboto-Bold.ttf", 28)
-    font_headline = load_font("Roboto-Bold.ttf", 78)
-    font_caption = load_font("Roboto-Regular.ttf", 34)
+    font_headline = load_font("Roboto-Bold.ttf", 72)
+    font_caption = load_font("Roboto-Regular.ttf", 32)
     font_button = load_font("Roboto-Bold.ttf", 26)
-    font_footer = load_font("Roboto-Regular.ttf", 26)
+    font_footer = load_font("Roboto-Regular.ttf", 25)
 
-    # Background shapes
+    # Premium background composition.
+    draw.rectangle((0, 0, 1080, 1350), fill=bg_color)
     draw.ellipse((760, -190, 1320, 380), fill=(255, 255, 255, 28))
-    draw.ellipse((-260, 920, 390, 1570), fill=(255, 255, 255, 20))
+    draw.ellipse((-280, 920, 390, 1580), fill=(255, 255, 255, 20))
+    draw.ellipse((850, 780, 1280, 1210), fill=(0, 0, 0, 24))
 
-    # Border frame
+    # Border frame.
     draw.rounded_rectangle(
         (44, 44, 1036, 1306),
         radius=52,
-        outline=(255, 255, 255, 70),
+        outline=(255, 255, 255, 75),
         width=2,
     )
 
-    # Logo
-    draw.rounded_rectangle((70, 70, 265, 135), radius=12, fill=(0, 0, 0, 235))
-    draw.text((90, 86), "THE WORLD", font=font_logo, fill="white")
-    draw.rectangle((90, 121, 230, 128), fill=accent_color)
+    # Logo.
+    draw.rounded_rectangle((70, 70, 275, 140), radius=13, fill=(0, 0, 0, 235))
+    draw.text((90, 88), "THE WORLD", font=font_logo, fill="white")
+    draw.rectangle((90, 126, 238, 133), fill=accent_color)
 
-    # Main image
-    bg_image = get_background_image(article, keyword)
+    # Main visual area.
+    bg_image = get_background_image(article, keyword, content)
     image_box = (70, 175, 940, 565)
     paste_rounded_image(canvas, bg_image, image_box, radius=42)
 
-    # Image overlay
-    overlay = Image.new("RGBA", (940, 565), (0, 0, 0, 45))
+    # Editorial overlay, not blacking out the image.
+    overlay = Image.new("RGBA", (940, 565), (0, 0, 0, 38))
     mask = Image.new("L", (940, 565), 0)
     mask_draw = ImageDraw.Draw(mask)
     mask_draw.rounded_rectangle((0, 0, 940, 565), radius=42, fill=255)
     canvas.paste(overlay, (70, 175), mask)
 
-    # Badge
-    draw.rounded_rectangle((70, 780, 380, 842), radius=14, fill=accent_color)
+    # Small category chip.
+    draw.rounded_rectangle((70, 780, 382, 842), radius=14, fill=accent_color)
     draw.text((100, 797), "BREAKING NEWS", font=font_tag, fill="black")
 
-    # White content card
-    card_x = 70
-    card_y = 875
-    card_w = 940
-    card_h = 300
-
+    # Content card.
+    card_x, card_y, card_w, card_h = 70, 875, 940, 305
     draw.rounded_rectangle(
         (card_x, card_y, card_x + card_w, card_y + card_h),
         radius=38,
         fill="white",
     )
 
-    # Headline
     headline = content.get("headline", "BREAKING STORY DEVELOPING").upper()
     headline_lines = wrap_text_by_width(draw, headline, font_headline, 840)
 
-    y = card_y + 45
+    y = card_y + 44
     for line in headline_lines[:2]:
         draw.text((card_x + 45, y), line, font=font_headline, fill="black")
-        y += 86
+        y += 80
 
-    # Caption
     caption = content.get("caption", "")
     caption_lines = wrap_text_by_width(draw, caption, font_caption, 840)
 
-    y += 4
+    y += 6
     for line in caption_lines[:2]:
         draw.text((card_x + 48, y), line, font=font_caption, fill=(45, 45, 45))
-        y += 42
+        y += 40
 
-    # Bottom button
+    # Footer.
     footer_y = 1230
-
     draw.rounded_rectangle(
         (70, footer_y, 285, footer_y + 58), radius=14, fill=accent_color
     )
     draw.text((100, footer_y + 16), "READ MORE", font=font_button, fill="black")
 
-    # Source
     source_name = "Newsmedia"
     if isinstance(article.get("source"), dict):
         source_name = article["source"].get("name", "Newsmedia")
