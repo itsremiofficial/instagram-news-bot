@@ -73,7 +73,9 @@ def build_local_fallback_content(article):
     clean_title = re.sub(r"[^\w\s]", "", title).strip()
     words = clean_title.split()
 
-    headline = " ".join(words[:8]).upper() if len(words) >= 4 else "BREAKING STORY DEVELOPING"
+    headline = (
+        " ".join(words[:8]).upper() if len(words) >= 4 else "BREAKING STORY DEVELOPING"
+    )
 
     caption_source = (description or title).strip()
 
@@ -286,7 +288,13 @@ def wrap_text_by_width(draw, text, font, max_width):
 
 def paste_rounded_image(base, image, box, radius=38):
     x, y, width, height = box
-    fitted = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)
+
+    fitted = ImageOps.fit(
+        image,
+        (width, height),
+        method=Image.Resampling.LANCZOS,
+        centering=(0.5, 0.5),
+    )
 
     mask = Image.new("L", (width, height), 0)
     mask_draw = ImageDraw.Draw(mask)
@@ -297,72 +305,103 @@ def paste_rounded_image(base, image, box, radius=38):
 
 def create_image(content, keyword, article):
     size = (1080, 1080)
-    bg_color = content.get("graphic_color", "#1e3a5f")
+    bg_color = content.get("graphic_color", "#7f1d1d")
     accent_color = "#eaff00"
 
     canvas = Image.new("RGBA", size, bg_color)
     draw = ImageDraw.Draw(canvas)
 
-    font_logo = load_font("Roboto-Bold.ttf", 28)
-    font_badge = load_font("Roboto-Bold.ttf", 30)
-    font_headline = load_font("Roboto-Bold.ttf", 76)
-    font_caption = load_font("Roboto-Regular.ttf", 32)
-    font_small = load_font("Roboto-Regular.ttf", 25)
-    font_button = load_font("Roboto-Bold.ttf", 24)
+    font_logo = load_font("Roboto-Bold.ttf", 30)
+    font_badge = load_font("Roboto-Bold.ttf", 28)
+    font_headline = load_font("Roboto-Bold.ttf", 64)
+    font_caption = load_font("Roboto-Regular.ttf", 30)
+    font_footer = load_font("Roboto-Regular.ttf", 24)
+    font_button = load_font("Roboto-Bold.ttf", 23)
 
-    draw.ellipse((730, -210, 1280, 360), fill=(255, 255, 255, 24))
-    draw.ellipse((-220, 740, 360, 1320), fill=(255, 255, 255, 18))
+    # Background shapes
+    draw.ellipse((760, -170, 1280, 330), fill=(255, 255, 255, 30))
+    draw.ellipse((-260, 760, 350, 1370), fill=(255, 255, 255, 22))
+
+    # Main border
     draw.rounded_rectangle(
         (44, 44, 1036, 1036),
         radius=48,
-        outline=(255, 255, 255, 42),
+        outline=(255, 255, 255, 60),
         width=2,
     )
 
-    draw.rounded_rectangle((70, 60, 255, 122), radius=10, fill=(0, 0, 0, 210))
-    draw.text((88, 72), "THE WORLD", font=font_logo, fill="white")
-    draw.rectangle((88, 104, 220, 111), fill=accent_color)
+    # Logo
+    draw.rounded_rectangle((70, 60, 255, 122), radius=10, fill=(0, 0, 0, 230))
+    draw.text((88, 75), "THE WORLD", font=font_logo, fill="white")
+    draw.rectangle((88, 106, 220, 113), fill=accent_color)
 
+    # Main image
     bg_image = get_background_image(article, keyword)
-    paste_rounded_image(canvas, bg_image, (70, 145, 940, 430), radius=42)
+    image_box = (70, 150, 940, 390)
+    paste_rounded_image(canvas, bg_image, image_box, radius=40)
 
-    image_overlay = Image.new("RGBA", (940, 430), (0, 0, 0, 70))
-    image_mask = Image.new("L", (940, 430), 0)
+    # Soft dark overlay on image
+    image_overlay = Image.new("RGBA", (940, 390), (0, 0, 0, 55))
+    image_mask = Image.new("L", (940, 390), 0)
     image_mask_draw = ImageDraw.Draw(image_mask)
-    image_mask_draw.rounded_rectangle((0, 0, 940, 430), radius=42, fill=255)
-    canvas.paste(image_overlay, (70, 145), image_mask)
+    image_mask_draw.rounded_rectangle((0, 0, 940, 390), radius=40, fill=255)
+    canvas.paste(image_overlay, (70, 150), image_mask)
 
-    draw.rounded_rectangle((70, 605, 365, 662), radius=13, fill=accent_color)
-    draw.text((96, 617), "BREAKING NEWS", font=font_badge, fill="black")
+    # Breaking badge
+    draw.rounded_rectangle((70, 575, 360, 635), radius=13, fill=accent_color)
+    draw.text((98, 591), "BREAKING NEWS", font=font_badge, fill="black")
 
-    draw.rounded_rectangle((70, 690, 1010, 908), radius=34, fill="white")
+    # White content card
+    card_x = 70
+    card_y = 665
+    card_w = 940
+    card_h = 270
 
+    draw.rounded_rectangle(
+        (card_x, card_y, card_x + card_w, card_y + card_h),
+        radius=36,
+        fill="white",
+    )
+
+    # Headline
     headline = content.get("headline", "BREAKING STORY DEVELOPING").upper()
-    headline_lines = wrap_text_by_width(draw, headline, font_headline, 850)
+    headline_lines = wrap_text_by_width(draw, headline, font_headline, 820)
 
-    y = 718
+    y = card_y + 38
     for line in headline_lines[:2]:
-        draw.text((105, y), line, font=font_headline, fill="black")
-        y += 82
+        draw.text((card_x + 42, y), line, font=font_headline, fill="black")
+        y += 72
 
+    # Caption
     caption = content.get("caption", "")
-    caption_lines = wrap_text_by_width(draw, caption, font_caption, 850)
+    caption_lines = wrap_text_by_width(draw, caption, font_caption, 820)
 
-    y += 10
+    y += 8
     for line in caption_lines[:2]:
-        draw.text((108, y), line, font=font_caption, fill=(40, 40, 40))
-        y += 40
+        draw.text((card_x + 44, y), line, font=font_caption, fill=(45, 45, 45))
+        y += 38
 
-    draw.rounded_rectangle((70, 945, 260, 1000), radius=12, fill=accent_color)
-    draw.text((95, 961), "READ MORE", font=font_button, fill="black")
-    draw.text((225, 959), "➜", font=font_button, fill="black")
+    # Bottom footer strip
+    footer_y = 960
+
+    draw.rounded_rectangle((70, footer_y, 260, 1012), radius=12, fill=accent_color)
+    draw.text((96, footer_y + 14), "READ MORE", font=font_button, fill="black")
 
     source_name = "Newsmedia"
     if isinstance(article.get("source"), dict):
         source_name = article["source"].get("name", "Newsmedia")
 
-    footer_text = f"Source: {source_name}"
-    draw.text((690, 962), footer_text, font=font_small, fill=(255, 255, 255, 225))
+    source_text = f"Source: {source_name}"
+
+    source_bbox = draw.textbbox((0, 0), source_text, font=font_footer)
+    source_width = source_bbox[2] - source_bbox[0]
+
+    draw.text(
+        (1010 - source_width, footer_y + 13),
+        source_text,
+        font=font_footer,
+        fill=(255, 255, 255, 230),
+    )
 
     canvas.convert("RGB").save(POST_IMAGE_PATH, quality=95)
     return POST_IMAGE_PATH
