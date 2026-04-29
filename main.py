@@ -16,7 +16,12 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 GNEWS_URL = "https://gnews.io/api/v4/top-headlines"
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODELS = [
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.5-flash",
+]
 INSTAGRAM_API_VERSION = "v25.0"
 POST_IMAGE_PATH = "/tmp/post.jpeg"
 
@@ -63,115 +68,153 @@ def fetch_news():
     return best_article
 
 
+def build_local_fallback_content(article):
+    title = article.get("title", "Breaking News Update")
+    description = article.get("description", "")
+
+    clean_title = re.sub(r"[^\w\s]", "", title).strip()
+    words = clean_title.split()
+
+    if len(words) >= 4:
+        headline = " ".join(words[:8]).upper()
+    else:
+        headline = "BREAKING STORY DEVELOPING NOW"
+
+    caption_source = description or title
+    caption_source = caption_source.strip()
+
+    if len(caption_source) > 180:
+        caption_source = caption_source[:177].rsplit(" ", 1)[0] + "..."
+
+    caption = f"{caption_source} This story is developing."
+
+    return {
+        "headline": headline,
+        "caption": caption,
+        "cta": "What do you think about this?",
+        "hashtags": [
+            "#News",
+            "#BreakingNews",
+            "#WorldNews",
+            "#CurrentEvents",
+            "#TodayNews",
+            "#GlobalNews",
+            "#NewsUpdate",
+            "#TheWorldJournal",
+        ],
+        "graphic_color": "#1e293b",
+    }
+
+
 def generate_content(article):
     prompt = f"""
-                You are a senior news social media editor creating content for modern, high-impact Instagram news graphics.
+You are a senior news social media editor creating content for modern, high-impact Instagram news graphics.
 
-                Your output will be used on bold, visually striking social media cards similar to premium news carousel and breaking-news templates. The style should feel sharp, clean, attention-grabbing, and highly clickable.
+Your output will be used on bold, visually striking social media cards similar to premium news carousel and breaking-news templates. The style should feel sharp, clean, attention-grabbing, and highly clickable.
 
-                Given the article below, return ONLY valid JSON.
-                Do not return markdown.
-                Do not return backticks.
-                Do not return commentary or explanation.
+Given the article below, return ONLY valid JSON.
+Do not return markdown.
+Do not return backticks.
+Do not return commentary or explanation.
 
-                Article title: {article.get("title", "")}
-                Article summary: {article.get("description", "")}
+Article title: {article.get("title", "")}
+Article summary: {article.get("description", "")}
 
-                Content goals:
-                - The headline must be the strongest hook.
-                - The headline must stop scrolling and create curiosity instantly.
-                - The headline must feel urgent, important, or emotionally compelling.
-                - The headline must stay fact-based and avoid misinformation.
-                - The wording should fit cleanly on a graphic card.
-                - The style should match bold social news visuals, with short, punchy, high-impact phrasing.
-                - The caption should feel engaging and easy to read.
-                - The caption should summarize the story clearly and make people care.
-                - The CTA should encourage interaction.
-                - Hashtags should be relevant and useful for discoverability.
+Content goals:
+- The headline must be the strongest hook.
+- The headline must stop scrolling and create curiosity instantly.
+- The headline must feel urgent, important, or emotionally compelling.
+- The headline must stay fact-based and avoid misinformation.
+- The wording should fit cleanly on a graphic card.
+- The style should match bold social news visuals, with short, punchy, high-impact phrasing.
+- The caption should feel engaging and easy to read.
+- The caption should summarize the story clearly and make people care.
+- The CTA should encourage interaction.
+- Hashtags should be relevant and useful for discoverability.
 
-                Return JSON with exactly these fields:
-                - "headline": a strong hook-style graphic headline in ALL CAPS, 4 to 8 words, punchy, curiosity-driven, visually powerful, easy to place on a news card
-                - "caption": exactly 2 short sentences, engaging and conversational, summarizing the news clearly, max 1 emoji
-                - "cta": one short engagement-focused sentence, for example "What do you think about this?"
-                - "hashtags": a list of 8 relevant hashtags as strings
-                - "graphic_color": one of: "#1e293b", "#7f1d1d", "#1e3a5f", "#14532d"
+Return JSON with exactly these fields:
+- "headline": a strong hook-style graphic headline in ALL CAPS, 4 to 8 words, punchy, curiosity-driven, visually powerful, easy to place on a news card
+- "caption": exactly 2 short sentences, engaging and conversational, summarizing the news clearly, max 1 emoji
+- "cta": one short engagement-focused sentence, for example "What do you think about this?"
+- "hashtags": a list of 8 relevant hashtags as strings
+- "graphic_color": one of: "#1e293b", "#7f1d1d", "#1e3a5f", "#14532d"
 
-                Headline rules:
-                - Use strong hook language
-                - Prefer tension, urgency, surprise, impact, or curiosity
-                - Avoid weak generic summaries
-                - Avoid clickbait that misrepresents the story
-                - Avoid long headlines
-                - Make it feel made for a bold visual card
+Headline rules:
+- Use strong hook language.
+- Prefer tension, urgency, surprise, impact, or curiosity.
+- Avoid weak generic summaries.
+- Avoid clickbait that misrepresents the story.
+- Avoid long headlines.
+- Make it feel made for a bold visual card.
+"""
 
-                Examples of headline style:
-                - MARKETS SHAKEN BY NEW WARNING
-                - THIS MOVE COULD CHANGE EVERYTHING
-                - GLOBAL TENSIONS HIT A NEW HIGH
-                - WHY THIS STORY MATTERS NOW
-                - MAJOR SHIFT STUNS INVESTORS
-                """
+    max_retries_per_model = 2
 
-    max_retries = 6
-
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-            )
-
-            if not response.text:
-                raise ValueError("Gemini returned an empty response.")
-
-            raw = response.text.strip()
-
-            raw = re.sub(r"^```json\s*", "", raw)
-            raw = re.sub(r"^```\s*", "", raw)
-            raw = re.sub(r"\s*```$", "", raw)
-
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-
-            if not match:
-                raise ValueError(f"Gemini did not return JSON. Raw response: {raw}")
-
-            content = json.loads(match.group(0))
-            validate_generated_content(content)
-
-            return content
-
-        except Exception as error:
-            error_text = str(error).lower()
-
-            is_retryable_error = (
-                "429" in error_text
-                or "quota" in error_text
-                or "rate limit" in error_text
-                or "resource_exhausted" in error_text
-                or "503" in error_text
-                or "unavailable" in error_text
-                or "high demand" in error_text
-                or "servererror" in error_text
-                or "temporarily" in error_text
-                or "500" in error_text
-                or "502" in error_text
-                or "504" in error_text
-            )
-
-            if is_retryable_error and attempt < max_retries - 1:
-                wait_time = min(300, 30 * (attempt + 1)) + random.randint(5, 20)
-
+    for model_name in GEMINI_MODELS:
+        for attempt in range(max_retries_per_model):
+            try:
                 print(
-                    f"Gemini temporary error. Attempt {attempt + 1}/{max_retries}. "
-                    f"Waiting {wait_time} seconds before retry..."
+                    f"Trying Gemini model: {model_name}, "
+                    f"attempt {attempt + 1}/{max_retries_per_model}"
                 )
 
-                time.sleep(wait_time)
-                continue
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
 
-            raise
+                if not response.text:
+                    raise ValueError("Gemini returned an empty response.")
 
-    raise RuntimeError("Gemini request failed after multiple retries.")
+                raw = response.text.strip()
+
+                raw = re.sub(r"^```json\s*", "", raw)
+                raw = re.sub(r"^```\s*", "", raw)
+                raw = re.sub(r"\s*```$", "", raw)
+
+                match = re.search(r"\{.*\}", raw, re.DOTALL)
+
+                if not match:
+                    raise ValueError(f"Gemini did not return JSON. Raw response: {raw}")
+
+                content = json.loads(match.group(0))
+                validate_generated_content(content)
+
+                print(f"Gemini content generated using model: {model_name}")
+                return content
+
+            except Exception as error:
+                error_text = str(error).lower()
+
+                is_retryable_error = (
+                    "429" in error_text
+                    or "quota" in error_text
+                    or "rate limit" in error_text
+                    or "resource_exhausted" in error_text
+                    or "503" in error_text
+                    or "unavailable" in error_text
+                    or "high demand" in error_text
+                    or "servererror" in error_text
+                    or "temporarily" in error_text
+                    or "500" in error_text
+                    or "502" in error_text
+                    or "504" in error_text
+                )
+
+                if is_retryable_error:
+                    wait_time = 20 + random.randint(5, 15)
+                    print(
+                        f"Gemini temporary error on {model_name}. "
+                        f"Waiting {wait_time} seconds before retry..."
+                    )
+                    time.sleep(wait_time)
+                    continue
+
+                print(f"Gemini failed with non-retryable error: {error}")
+                break
+
+    print("All Gemini models failed. Using local fallback content.")
+    return build_local_fallback_content(article)
 
 
 def validate_generated_content(content):
