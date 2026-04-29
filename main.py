@@ -20,7 +20,7 @@ GEMINI_MODEL = "gemini-2.5-flash"
 INSTAGRAM_API_VERSION = "v25.0"
 POST_IMAGE_PATH = "/tmp/post.jpeg"
 
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+client = genai.Client(api_key=os.environ["GEMINI_KEY"])
 
 
 def fetch_news():
@@ -44,9 +44,7 @@ def fetch_news():
         published_at = article.get("publishedAt")
 
         try:
-            published_dt = datetime.fromisoformat(
-                published_at.replace("Z", "+00:00")
-            )
+            published_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
             age_hours = (
                 datetime.now(timezone.utc) - published_dt
             ).total_seconds() / 3600
@@ -245,8 +243,7 @@ def upload_image_free(filepath):
 
 def publish_to_instagram(image_path, content):
     base_url = (
-        f"https://graph.facebook.com/{INSTAGRAM_API_VERSION}/"
-        f"{os.environ['IG_USER_ID']}"
+        f"https://graph.facebook.com/{INSTAGRAM_API_VERSION}/{os.environ['IG_USER_ID']}"
     )
     token = os.environ["IG_TOKEN"]
 
@@ -293,7 +290,9 @@ def publish_to_instagram(image_path, content):
             break
 
         if status_response.get("status_code") == "ERROR":
-            raise RuntimeError(f"Instagram container processing failed: {status_response}")
+            raise RuntimeError(
+                f"Instagram container processing failed: {status_response}"
+            )
 
         time.sleep(3)
 
