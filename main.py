@@ -101,7 +101,7 @@ def create_image(content, keyword):
         y += 90
 
     # Source label at bottom
-    draw.text((80, 960), "YOUR NEWS PAGE  •  @handle",
+    draw.text((80, 960), "THE WORLD JOURNAL  •  @the.worldjournal",
           font=font_src, fill=(255, 255, 255, 180))
 
     path = "/tmp/post.jpeg"
