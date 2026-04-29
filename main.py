@@ -104,7 +104,7 @@ def create_image(content, keyword):
     draw.text((80, 960), "YOUR NEWS PAGE  •  @handle",
           font=font_src, fill=(255, 255, 255, 180))
 
-    path = "/tmp/post.jpg"
+    path = "/tmp/post.jpeg"
     bg.convert("RGB").save(path, quality=95)
     return path
 
@@ -117,7 +117,14 @@ def upload_image_free(filepath):
         r = requests.post("https://api.imgbb.com/1/upload",
             data={"key": os.environ["IMGBB_KEY"]},
             files={"image": f})
-    return r.json()["data"]["url"]
+    data = r.json()
+
+    print("ImgBB response:", json.dumps(data, indent=2))
+
+    if "data" not in data:
+        raise Exception(f"ImgBB upload failed: {data}")
+
+    return data["data"]["image"]["url"]
 
 def publish_to_instagram(image_path, content):
     BASE = f"https://graph.facebook.com/v21.0/{os.environ['IG_USER_ID']}"
