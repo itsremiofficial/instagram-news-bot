@@ -79,7 +79,7 @@ Return JSON with exactly these fields:
 - "graphic_color": one of: "#1e293b", "#7f1d1d", "#1e3a5f", "#14532d"
 """
 
-    max_retries = 5
+    max_retries = 6
 
     for attempt in range(max_retries):
         try:
@@ -110,18 +110,29 @@ Return JSON with exactly these fields:
         except Exception as error:
             error_text = str(error).lower()
 
-            is_quota_error = (
+            is_retryable_error = (
                 "429" in error_text
-                or "resource_exhausted" in error_text
                 or "quota" in error_text
                 or "rate limit" in error_text
+                or "resource_exhausted" in error_text
+                or "503" in error_text
+                or "unavailable" in error_text
+                or "high demand" in error_text
+                or "servererror" in error_text
+                or "temporarily" in error_text
+                or "500" in error_text
+                or "502" in error_text
+                or "504" in error_text
             )
 
-            if is_quota_error and attempt < max_retries - 1:
-                wait_time = 65 + random.randint(1, 15)
+            if is_retryable_error and attempt < max_retries - 1:
+                wait_time = min(300, 30 * (attempt + 1)) + random.randint(5, 20)
+
                 print(
-                    f"Gemini quota reached. Waiting {wait_time} seconds before retry..."
+                    f"Gemini temporary error. Attempt {attempt + 1}/{max_retries}. "
+                    f"Waiting {wait_time} seconds before retry..."
                 )
+
                 time.sleep(wait_time)
                 continue
 
