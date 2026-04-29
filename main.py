@@ -112,19 +112,37 @@ def create_image(content, keyword):
 import time
 
 def upload_image_free(filepath):
-    # ImgBB — free image hosting with API (no login needed)
+    repo = os.environ["GITHUB_REPOSITORY"]
+    token = os.environ["GITHUB_TOKEN"]
+
+    filename = f"post-{int(time.time())}.jpg"
+    path = f"public-posts/{filename}"
+
     with open(filepath, "rb") as f:
-        r = requests.post("https://api.imgbb.com/1/upload",
-            data={"key": os.environ["IMGBB_KEY"]},
-            files={"image": f})
+        import base64
+        content = base64.b64encode(f.read()).decode("utf-8")
+
+    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+
+    r = requests.put(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json"
+        },
+        json={
+            "message": f"Upload Instagram image {filename}",
+            "content": content
+        }
+    )
+
     data = r.json()
+    print("GitHub upload response:", json.dumps(data, indent=2))
 
-    print("ImgBB response:", json.dumps(data, indent=2))
+    if r.status_code not in [200, 201]:
+        raise Exception(f"GitHub image upload failed: {data}")
 
-    if "data" not in data:
-        raise Exception(f"ImgBB upload failed: {data}")
-
-    return data["data"]["image"]["url"]
+    return f"https://raw.githubusercontent.com/{repo}/main/{path}"
 
 def publish_to_instagram(image_path, content):
     BASE = f"https://graph.facebook.com/v21.0/{os.environ['IG_USER_ID']}"
