@@ -65,19 +65,52 @@ def fetch_news():
 
 def generate_content(article):
     prompt = f"""
-You are a news social media editor. Given this article, return ONLY
-valid JSON, no markdown, no backticks, no explanation.
+                You are a senior news social media editor creating content for modern, high-impact Instagram news graphics.
 
-Article title: {article.get("title", "")}
-Article summary: {article.get("description", "")}
+                Your output will be used on bold, visually striking social media cards similar to premium news carousel and breaking-news templates. The style should feel sharp, clean, attention-grabbing, and highly clickable.
 
-Return JSON with exactly these fields:
-- "headline": 6-word punchy graphic headline, all caps
-- "caption": 2 sentence engaging summary, conversational, max 1 emoji
-- "cta": one sentence call-to-action, example: "Save this for later 📌"
-- "hashtags": list of 8 relevant hashtags as strings
-- "graphic_color": one of: "#1e293b", "#7f1d1d", "#1e3a5f", "#14532d"
-"""
+                Given the article below, return ONLY valid JSON.
+                Do not return markdown.
+                Do not return backticks.
+                Do not return commentary or explanation.
+
+                Article title: {article.get("title", "")}
+                Article summary: {article.get("description", "")}
+
+                Content goals:
+                - The headline must be the strongest hook.
+                - The headline must stop scrolling and create curiosity instantly.
+                - The headline must feel urgent, important, or emotionally compelling.
+                - The headline must stay fact-based and avoid misinformation.
+                - The wording should fit cleanly on a graphic card.
+                - The style should match bold social news visuals, with short, punchy, high-impact phrasing.
+                - The caption should feel engaging and easy to read.
+                - The caption should summarize the story clearly and make people care.
+                - The CTA should encourage interaction.
+                - Hashtags should be relevant and useful for discoverability.
+
+                Return JSON with exactly these fields:
+                - "headline": a strong hook-style graphic headline in ALL CAPS, 4 to 8 words, punchy, curiosity-driven, visually powerful, easy to place on a news card
+                - "caption": exactly 2 short sentences, engaging and conversational, summarizing the news clearly, max 1 emoji
+                - "cta": one short engagement-focused sentence, for example "What do you think about this?"
+                - "hashtags": a list of 8 relevant hashtags as strings
+                - "graphic_color": one of: "#1e293b", "#7f1d1d", "#1e3a5f", "#14532d"
+
+                Headline rules:
+                - Use strong hook language
+                - Prefer tension, urgency, surprise, impact, or curiosity
+                - Avoid weak generic summaries
+                - Avoid clickbait that misrepresents the story
+                - Avoid long headlines
+                - Make it feel made for a bold visual card
+
+                Examples of headline style:
+                - MARKETS SHAKEN BY NEW WARNING
+                - THIS MOVE COULD CHANGE EVERYTHING
+                - GLOBAL TENSIONS HIT A NEW HIGH
+                - WHY THIS STORY MATTERS NOW
+                - MAJOR SHIFT STUNS INVESTORS
+                """
 
     max_retries = 6
 
