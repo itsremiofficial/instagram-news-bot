@@ -211,10 +211,15 @@ def validate_generated_content(content):
 
 def fetch_bg_image(keyword):
     headers = {"Authorization": os.environ["PEXELS_KEY"]}
+
+    search_query = keyword
+    if not search_query or len(search_query) < 3:
+        search_query = "world news"
+
     params = {
-        "query": keyword,
-        "per_page": 1,
-        "orientation": "square",
+        "query": search_query,
+        "per_page": 5,
+        "orientation": "portrait",
     }
 
     response = requests.get(
@@ -228,9 +233,9 @@ def fetch_bg_image(keyword):
     photos = response.json().get("photos", [])
 
     if not photos:
-        raise RuntimeError(f"No Pexels image found for keyword: {keyword}")
+        raise RuntimeError(f"No Pexels image found for keyword: {search_query}")
 
-    photo_url = photos[0]["src"]["large2x"]
+    photo_url = photos[0]["src"].get("portrait") or photos[0]["src"].get("large2x")
 
     image_response = requests.get(photo_url, timeout=30)
     image_response.raise_for_status()
@@ -249,11 +254,25 @@ def get_background_image(article, keyword):
 
     if article_image:
         try:
-            return download_image(article_image)
+            img = download_image(article_image)
+
+            if img.width > 100 and img.height > 100:
+                return img
+
         except Exception as error:
             print(f"Article image failed. Using Pexels fallback. Error: {error}")
 
-    return fetch_bg_image(keyword)
+    title = article.get("title", "") or keyword or "world news"
+    cleaned_title = re.sub(r"[^a-zA-Z0-9\s]", " ", title)
+    words = cleaned_title.split()
+
+    search_keyword = " ".join(words[:4]) if words else "world news"
+
+    try:
+        return fetch_bg_image(search_keyword)
+    except Exception as error:
+        print(f"Pexels title search failed. Using generic fallback. Error: {error}")
+        return fetch_bg_image("breaking news")
 
 
 def load_font(path, size):
@@ -304,103 +323,105 @@ def paste_rounded_image(base, image, box, radius=38):
 
 
 def create_image(content, keyword, article):
-    size = (1080, 1080)
-    bg_color = content.get("graphic_color", "#7f1d1d")
+    size = (1080, 1350)
+    bg_color = content.get("graphic_color", "#1e3a5f")
     accent_color = "#eaff00"
 
     canvas = Image.new("RGBA", size, bg_color)
     draw = ImageDraw.Draw(canvas)
 
-    font_logo = load_font("Roboto-Bold.ttf", 30)
-    font_badge = load_font("Roboto-Bold.ttf", 28)
-    font_headline = load_font("Roboto-Bold.ttf", 64)
-    font_caption = load_font("Roboto-Regular.ttf", 30)
-    font_footer = load_font("Roboto-Regular.ttf", 24)
-    font_button = load_font("Roboto-Bold.ttf", 23)
+    font_logo = load_font("Roboto-Bold.ttf", 32)
+    font_tag = load_font("Roboto-Bold.ttf", 28)
+    font_headline = load_font("Roboto-Bold.ttf", 78)
+    font_caption = load_font("Roboto-Regular.ttf", 34)
+    font_button = load_font("Roboto-Bold.ttf", 26)
+    font_footer = load_font("Roboto-Regular.ttf", 26)
 
     # Background shapes
-    draw.ellipse((760, -170, 1280, 330), fill=(255, 255, 255, 30))
-    draw.ellipse((-260, 760, 350, 1370), fill=(255, 255, 255, 22))
+    draw.ellipse((760, -190, 1320, 380), fill=(255, 255, 255, 28))
+    draw.ellipse((-260, 920, 390, 1570), fill=(255, 255, 255, 20))
 
-    # Main border
+    # Border frame
     draw.rounded_rectangle(
-        (44, 44, 1036, 1036),
-        radius=48,
-        outline=(255, 255, 255, 60),
+        (44, 44, 1036, 1306),
+        radius=52,
+        outline=(255, 255, 255, 70),
         width=2,
     )
 
     # Logo
-    draw.rounded_rectangle((70, 60, 255, 122), radius=10, fill=(0, 0, 0, 230))
-    draw.text((88, 75), "THE WORLD", font=font_logo, fill="white")
-    draw.rectangle((88, 106, 220, 113), fill=accent_color)
+    draw.rounded_rectangle((70, 70, 265, 135), radius=12, fill=(0, 0, 0, 235))
+    draw.text((90, 86), "THE WORLD", font=font_logo, fill="white")
+    draw.rectangle((90, 121, 230, 128), fill=accent_color)
 
     # Main image
     bg_image = get_background_image(article, keyword)
-    image_box = (70, 150, 940, 390)
-    paste_rounded_image(canvas, bg_image, image_box, radius=40)
+    image_box = (70, 175, 940, 565)
+    paste_rounded_image(canvas, bg_image, image_box, radius=42)
 
-    # Soft dark overlay on image
-    image_overlay = Image.new("RGBA", (940, 390), (0, 0, 0, 55))
-    image_mask = Image.new("L", (940, 390), 0)
-    image_mask_draw = ImageDraw.Draw(image_mask)
-    image_mask_draw.rounded_rectangle((0, 0, 940, 390), radius=40, fill=255)
-    canvas.paste(image_overlay, (70, 150), image_mask)
+    # Image overlay
+    overlay = Image.new("RGBA", (940, 565), (0, 0, 0, 45))
+    mask = Image.new("L", (940, 565), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((0, 0, 940, 565), radius=42, fill=255)
+    canvas.paste(overlay, (70, 175), mask)
 
-    # Breaking badge
-    draw.rounded_rectangle((70, 575, 360, 635), radius=13, fill=accent_color)
-    draw.text((98, 591), "BREAKING NEWS", font=font_badge, fill="black")
+    # Badge
+    draw.rounded_rectangle((70, 780, 380, 842), radius=14, fill=accent_color)
+    draw.text((100, 797), "BREAKING NEWS", font=font_tag, fill="black")
 
     # White content card
     card_x = 70
-    card_y = 665
+    card_y = 875
     card_w = 940
-    card_h = 270
+    card_h = 300
 
     draw.rounded_rectangle(
         (card_x, card_y, card_x + card_w, card_y + card_h),
-        radius=36,
+        radius=38,
         fill="white",
     )
 
     # Headline
     headline = content.get("headline", "BREAKING STORY DEVELOPING").upper()
-    headline_lines = wrap_text_by_width(draw, headline, font_headline, 820)
+    headline_lines = wrap_text_by_width(draw, headline, font_headline, 840)
 
-    y = card_y + 38
+    y = card_y + 45
     for line in headline_lines[:2]:
-        draw.text((card_x + 42, y), line, font=font_headline, fill="black")
-        y += 72
+        draw.text((card_x + 45, y), line, font=font_headline, fill="black")
+        y += 86
 
     # Caption
     caption = content.get("caption", "")
-    caption_lines = wrap_text_by_width(draw, caption, font_caption, 820)
+    caption_lines = wrap_text_by_width(draw, caption, font_caption, 840)
 
-    y += 8
+    y += 4
     for line in caption_lines[:2]:
-        draw.text((card_x + 44, y), line, font=font_caption, fill=(45, 45, 45))
-        y += 38
+        draw.text((card_x + 48, y), line, font=font_caption, fill=(45, 45, 45))
+        y += 42
 
-    # Bottom footer strip
-    footer_y = 960
+    # Bottom button
+    footer_y = 1230
 
-    draw.rounded_rectangle((70, footer_y, 260, 1012), radius=12, fill=accent_color)
-    draw.text((96, footer_y + 14), "READ MORE", font=font_button, fill="black")
+    draw.rounded_rectangle(
+        (70, footer_y, 285, footer_y + 58), radius=14, fill=accent_color
+    )
+    draw.text((100, footer_y + 16), "READ MORE", font=font_button, fill="black")
 
+    # Source
     source_name = "Newsmedia"
     if isinstance(article.get("source"), dict):
         source_name = article["source"].get("name", "Newsmedia")
 
     source_text = f"Source: {source_name}"
-
     source_bbox = draw.textbbox((0, 0), source_text, font=font_footer)
     source_width = source_bbox[2] - source_bbox[0]
 
     draw.text(
-        (1010 - source_width, footer_y + 13),
+        (1010 - source_width, footer_y + 17),
         source_text,
         font=font_footer,
-        fill=(255, 255, 255, 230),
+        fill=(255, 255, 255, 235),
     )
 
     canvas.convert("RGB").save(POST_IMAGE_PATH, quality=95)
